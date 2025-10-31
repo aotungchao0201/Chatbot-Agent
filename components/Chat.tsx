@@ -4,18 +4,17 @@ import {
     BotIcon, 
     CodeIcon, 
     SendIcon, 
-    SparklesIcon, 
     PlusIcon,
     SearchIcon,
-    FilmIcon,
-    ImageIcon,
+    ImagePlusIcon,
     CanvasIcon,
     BookIcon,
     ProSearchIcon,
     ClockIcon,
     LinkIcon,
-    ImagePlusIcon,
-    CloseIcon
+    CloseIcon,
+    QuoteIcon,
+    ReplyIcon
 } from './icons';
 
 // Make marked available globally
@@ -40,6 +39,9 @@ const Chat: React.FC<ChatProps> = ({ messages, onSendMessage, isLoading, onOpenC
     const toolsMenuRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [uploadedImage, setUploadedImage] = useState<{ data: string; mimeType: string; file: File } | null>(null);
+    const [selectionPopup, setSelectionPopup] = useState<{ visible: boolean; top: number; left: number; text: string } | null>(null);
+    const popupRef = useRef<HTMLDivElement>(null);
+    const [quotedContext, setQuotedContext] = useState<string | null>(null);
 
 
     useEffect(() => {
@@ -54,18 +56,74 @@ const Chat: React.FC<ChatProps> = ({ messages, onSendMessage, isLoading, onOpenC
                 setIsToolsMenuOpen(false);
             }
         };
+
+        const handleMouseUp = (event: MouseEvent) => {
+             // Let the popup's own click handler do its job
+            if (popupRef.current && popupRef.current.contains(event.target as Node)) {
+                return;
+            }
+
+            const selection = window.getSelection();
+            if (selection && selection.toString().trim().length > 0) {
+                const selectedText = selection.toString();
+                const range = selection.getRangeAt(0);
+                
+                let container = range.commonAncestorContainer;
+                // If the container is a text node, get its parent element
+                if (container.nodeType === 3) {
+                    container = container.parentElement!;
+                }
+
+                let modelMessageElement = container as HTMLElement;
+                // Traverse up to find the message container
+                while (modelMessageElement && modelMessageElement.dataset.role !== 'model-message') {
+                    modelMessageElement = modelMessageElement.parentElement!;
+                }
+
+                if (modelMessageElement) {
+                    const rect = range.getBoundingClientRect();
+                    const containerRect = chatContainerRef.current!.getBoundingClientRect();
+                    setSelectionPopup({
+                        visible: true,
+                        top: rect.top - containerRect.top + chatContainerRef.current!.scrollTop - 45,
+                        left: rect.left - containerRect.left + rect.width / 2,
+                        text: selectedText,
+                    });
+                } else {
+                    setSelectionPopup(null);
+                }
+            } else {
+                setSelectionPopup(null);
+            }
+        };
+        
         document.addEventListener('mousedown', handleClickOutside);
+        document.addEventListener('mouseup', handleMouseUp);
+
         return () => {
             document.removeEventListener('mousedown', handleClickOutside);
+            document.removeEventListener('mouseup', handleMouseUp);
         };
     }, []);
+
+    const handleQuoteSelection = () => {
+        if (selectionPopup) {
+            setQuotedContext(selectionPopup.text);
+            setSelectionPopup(null);
+        }
+    };
 
 
     const handleSend = () => {
         if ((prompt.trim() || uploadedImage) && !isLoading) {
-            onSendMessage(prompt, uploadedImage ? { data: uploadedImage.data, mimeType: uploadedImage.mimeType } : null);
+            let finalPrompt = prompt;
+            if (quotedContext) {
+                 finalPrompt = `Dựa vào đoạn trích sau:\n\n> ${quotedContext}\n\nHãy trả lời câu hỏi sau: ${prompt}`;
+            }
+            onSendMessage(finalPrompt, uploadedImage ? { data: uploadedImage.data, mimeType: uploadedImage.mimeType } : null);
             setPrompt('');
             setUploadedImage(null);
+            setQuotedContext(null);
             if(fileInputRef.current) fileInputRef.current.value = '';
         }
     };
@@ -118,7 +176,7 @@ const Chat: React.FC<ChatProps> = ({ messages, onSendMessage, isLoading, onOpenC
        return (
         <div className="flex items-start gap-4">
             <BotIcon className="w-8 h-8 text-blue-400 flex-shrink-0 mt-1" />
-            <div className="max-w-2xl w-full p-4 rounded-2xl bg-gray-700 text-gray-200 rounded-bl-none">
+            <div data-role="model-message" className="max-w-2xl w-full p-4 rounded-2xl bg-gray-700 text-gray-200 rounded-bl-none">
                 <div className="flex items-center gap-3 font-semibold text-gray-300 border-b border-gray-600 pb-3 mb-4">
                     <ProSearchIcon className="w-5 h-5"/>
                     TÌM KIẾM CHUYÊN SÂU
@@ -194,32 +252,79 @@ const Chat: React.FC<ChatProps> = ({ messages, onSendMessage, isLoading, onOpenC
         if (msg.type === 'search-thinking') return <SearchThinkingMessage msg={msg} />;
         if (msg.type === 'search-result') return <SearchResultMessage msg={msg} />;
 
+        const htmlContent = marked.parse(msg.content);
         return (
              <div className="flex items-start gap-4">
                 <BotIcon className="w-8 h-8 text-blue-400 flex-shrink-0 mt-1" />
-                <div className="max-w-xl p-4 rounded-2xl bg-gray-700 text-gray-200 rounded-bl-none">
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                <div 
+                    data-role="model-message" 
+                    className="prose prose-invert prose-p:my-2 first:prose-p:mt-0 last:prose-p:mb-0 max-w-2xl w-full p-4 rounded-2xl bg-gray-700 text-gray-200 rounded-bl-none"
+                    dangerouslySetInnerHTML={{ __html: htmlContent }}
+                >
                 </div>
              </div>
         );
     };
     
-    const UserMessage = ({ msg }: { msg: ChatMessage }) => (
-        <div className="max-w-xl p-4 rounded-2xl bg-blue-600 text-white rounded-br-none">
-            {msg.image && (
-                <img 
-                    src={`data:${msg.image.mimeType};base64,${msg.image.data}`} 
-                    alt="User upload" 
-                    className="mb-3 rounded-lg max-w-xs"
-                />
-            )}
-            {msg.content && <p className="whitespace-pre-wrap">{msg.content}</p>}
-        </div>
-    );
+    const UserMessage = ({ msg }: { msg: ChatMessage }) => {
+        // Regex to detect and parse the contextual prompt structure
+        const contextRegex = /^Dựa vào đoạn trích sau:\s*\n\n> ([\s\S]+?)\s*\n\nHãy trả lời câu hỏi sau: ([\s\S]+)$/;
+        const match = msg.content.match(contextRegex);
+
+        if (match) {
+            const quotedText = match[1].trim();
+            const newQuestion = match[2].trim();
+
+            return (
+                <div className="max-w-xl p-4 rounded-2xl bg-blue-600 text-white rounded-br-none">
+                    <div className="flex items-start gap-2 opacity-80 border-b border-blue-500/50 pb-2 mb-2">
+                        <ReplyIcon className="w-4 h-4 mt-1 flex-shrink-0" />
+                        <p className="italic text-blue-100">{quotedText}</p>
+                    </div>
+                    <p className="mt-2 text-white">{newQuestion}</p>
+                </div>
+            );
+        }
+        
+        // Fallback for regular messages and image messages
+        return (
+            <div className="max-w-xl p-4 rounded-2xl bg-blue-600 text-white rounded-br-none">
+                {msg.image && (
+                    <img
+                        src={`data:${msg.image.mimeType};base64,${msg.image.data}`}
+                        alt="User upload"
+                        className="mb-3 rounded-lg max-w-xs"
+                    />
+                )}
+                {msg.content && (
+                     <div 
+                        className="prose prose-invert prose-p:my-0"
+                        dangerouslySetInnerHTML={{ __html: marked.parse(msg.content) }}
+                      />
+                )}
+            </div>
+        );
+    };
 
     return (
         <div className="flex flex-col h-full w-full max-w-4xl mx-auto px-4">
-            <div ref={chatContainerRef} className="flex-grow overflow-y-auto pt-8 pb-4">
+            <div ref={chatContainerRef} className="flex-grow overflow-y-auto pt-8 pb-4 relative">
+                 {selectionPopup?.visible && (
+                    <div
+                        ref={popupRef}
+                        className="absolute z-10"
+                        style={{ top: `${selectionPopup.top}px`, left: `${selectionPopup.left}px`, transform: 'translateX(-50%)' }}
+                    >
+                        <button
+                            onClick={handleQuoteSelection}
+                            title="Hỏi AI về đoạn này"
+                            className="flex items-center gap-2 bg-gray-900 border border-gray-700 rounded-full px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-800 shadow-lg"
+                        >
+                            <QuoteIcon className="w-4 h-4" />
+                            <span>Hỏi AI về đoạn này</span>
+                        </button>
+                    </div>
+                )}
                 <div className="space-y-6">
                     {messages.map((msg) => (
                         <div key={msg.id} className={`flex items-start gap-4 ${msg.role === 'user' ? 'justify-end' : ''}`}>
@@ -245,6 +350,19 @@ const Chat: React.FC<ChatProps> = ({ messages, onSendMessage, isLoading, onOpenC
             </div>
             
             <div className="flex-shrink-0 py-4">
+                 {quotedContext && (
+                    <div className="mb-2 p-3 bg-gray-800 border border-gray-700 rounded-lg flex items-start justify-between gap-3">
+                       <div className="flex items-start gap-3 min-w-0">
+                         <ReplyIcon className="w-5 h-5 text-gray-400 flex-shrink-0 mt-1" />
+                         <p className="text-sm text-gray-300 italic border-l-2 border-gray-600 pl-3 max-h-24 overflow-y-auto flex-1">
+                            {truncateText(quotedContext, 200)}
+                         </p>
+                       </div>
+                       <button onClick={() => setQuotedContext(null)} className="p-1 rounded-full hover:bg-gray-700 flex-shrink-0">
+                           <CloseIcon className="w-5 h-5" />
+                       </button>
+                    </div>
+                )}
                 {uploadedImage && (
                     <div className="mb-2 p-2 bg-gray-800 border border-gray-700 rounded-lg flex items-center justify-between">
                        <div className="flex items-center gap-3">
@@ -295,7 +413,7 @@ const Chat: React.FC<ChatProps> = ({ messages, onSendMessage, isLoading, onOpenC
                         value={prompt}
                         onChange={(e) => setPrompt(e.target.value)}
                         onKeyDown={handleKeyDown}
-                        placeholder={uploadedImage ? "Hỏi về hình ảnh này..." : "Mô tả điều bạn muốn tạo..."}
+                        placeholder={quotedContext ? "Hỏi về đoạn trích dẫn..." : uploadedImage ? "Hỏi về hình ảnh này..." : "Mô tả điều bạn muốn tạo..."}
                         className="flex-grow bg-transparent py-2 px-1 text-lg resize-none focus:outline-none max-h-48"
                         rows={1}
                     />

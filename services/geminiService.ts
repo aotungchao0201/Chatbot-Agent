@@ -37,6 +37,29 @@ const deepSearchTool: FunctionDeclaration = {
     }
 }
 
+const extractText = (response: any): string => {
+    try {
+        if (response.text) return response.text;
+        
+        const candidates = response.candidates || [];
+        let fullText = '';
+        for (const candidate of candidates) {
+            const content = candidate.content || {};
+            const parts = content.parts || [];
+            for (const part of parts) {
+                if (part.text) {
+                    fullText += part.text;
+                }
+            }
+        }
+        return fullText;
+    } catch (e) {
+        console.error("Error extracting text from response", e);
+        return "";
+    }
+};
+
+
 export async function generateImageAnalysis(prompt: string, image: { data: string; mimeType: string }): Promise<string> {
     const model = 'gemini-2.5-flash';
     try {
@@ -56,7 +79,7 @@ export async function generateImageAnalysis(prompt: string, image: { data: strin
             }
         });
         
-        return response.text;
+        return extractText(response);
     } catch (error) {
         console.error("Error analyzing image:", error);
         return "Xin lỗi, tôi không thể phân tích hình ảnh. Vui lòng kiểm tra console để biết thêm chi tiết.";
@@ -72,7 +95,7 @@ export async function generateChatResponse(prompt: string, history: ChatMessage[
             contents: [{role: 'user', parts: [{ text: prompt }]}], 
             config: {
                 tools: [{ functionDeclarations: [createCanvasTool, deepSearchTool] }],
-                systemInstruction: "Bạn là một trợ lý AI hữu ích. Hãy trả lời người dùng bằng tiếng Việt."
+                systemInstruction: "Bạn là một trợ lý AI hữu ích. Hãy trả lời người dùng bằng tiếng Việt. Người dùng có thể cung cấp một đoạn trích dẫn làm ngữ cảnh cho câu hỏi của họ (ví dụ: 'Dựa vào đoạn trích sau: ...'). Khi đó, hãy tập trung câu trả lời của bạn vào việc giải thích hoặc làm rõ đoạn trích đó."
             },
         });
 
@@ -88,7 +111,7 @@ export async function generateChatResponse(prompt: string, history: ChatMessage[
             }
         }
         
-        return { type: 'text', content: response.text };
+        return { type: 'text', content: extractText(response) };
 
     } catch (error) {
         console.error("Error generating chat response:", error);
