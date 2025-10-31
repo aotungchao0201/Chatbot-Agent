@@ -1,0 +1,7 @@
+{
+  "name": "Gemini AI Canvas & Live Chat",
+  "description": "An advanced chatbot featuring real-time voice conversations with the Gemini Live API and a code-interpreting Canvas that generates and previews code from user prompts.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
